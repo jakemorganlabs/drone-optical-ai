@@ -1,0 +1,59 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake libomp-dev
+
+      - name: Install deps (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake libomp || true
+
+      - name: Install deps (Windows)
+        if: runner.os == 'Windows'
+        run: choco install cmake -y
+
+      - name: Configure (CMake)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release .
+
+      - name: Build (CMake)
+        run: cmake --build build --config Release
+
+      - name: Run smoke tests
+        run: |
+          clang++ -std=c++17 -O2 -I. -o build/smoke_test tests/smoke_test.cpp
+          ./build/smoke_test
+
+  rpi-cross:
+    name: Cross-compile for Raspberry Pi (aarch64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install aarch64 toolchain
+        run: |
+          sudo apt update
+          sudo apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: Build (Make)
+        run: make CXX=aarch64-linux-gnu-g++ CXXFLAGS="-std=c++17 -O3"
+      - name: Verify binary
+        run: file build/embedded_voxel_mapper

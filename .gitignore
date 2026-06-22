@@ -1,0 +1,43 @@
+# Build artifacts
+/build/
+/bin/
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.a
+
+# Output files from running the mapper
+*.bin
+*.log
+*.out
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Python
+__pycache__/
+*.egg-info/
+.venv/
+venv/
+*.pyc
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+!Makefile
+install_manifest.txt
+
+# Doxygen
+docs/html/
+docs/latex/
+
+# Local third_party install lives in third_party/ - keep README but ignore vendored content
+third_party/nlohmann/
+third_party/stb*

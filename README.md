@@ -31,18 +31,19 @@ Raspberry Pi), macOS, and WSL.
 
 ```
 .
-├── math.hpp              # Math utilities, rotations, vectors
-├── grid.hpp              # Dual voxel grid management (mutex-protected)
-├── pose.hpp              # Pose structures, CameraFrame, PoseProvider interface
-├── motion.hpp            # Motion detection (fixed/adaptive/filtered)
-├── ray_marching.hpp       # Ray casting & DDA traversal of voxel grid
-├── clustering.hpp        # 3D DBSCAN clustering & multi-frame tracks
-├── navigation.hpp        # Costmap, path planning, FCU interface
-├── live_voxel_mapper.cpp # Main live mapping system + CLI entry point
-├── ray_voxel.cpp         # Legacy offline demo (optional third_party deps)
-├── CMakeLists.txt        # CMake build
-├── Makefile              # Make build (Pi-friendly)
-├── voxelmotionviewer.py  # Motion visualization (reads the VXG1 .bin output)
+├── core/                  # Header-only voxel core (math/grid/pose/motion/ray/cluster/nav)
+│   ├── math.hpp           # Math utilities, rotations, vectors
+│   ├── grid.hpp           # Dual voxel grid management (mutex-protected)
+│   ├── pose.hpp           # Pose structures, CameraFrame, PoseProvider interface
+│   ├── motion.hpp         # Motion detection (fixed/adaptive/filtered)
+│   ├── ray_marching.hpp   # Ray casting & DDA traversal of voxel grid
+│   ├── clustering.hpp     # 3D DBSCAN clustering & multi-frame tracks
+│   ├── navigation.hpp     # Costmap, path planning, FCU interface
+│   ├── live_voxel_mapper.cpp # Main live mapping system + CLI entry point
+│   └── ray_voxel.cpp      # Legacy offline demo (optional third_party deps)
+├── CMakeLists.txt         # CMake build (defines the voxelcore INTERFACE library)
+├── Makefile               # Make build (Pi-friendly)
+├── voxelmotionviewer.py   # Motion visualization (reads the VXG1 .bin output)
 ├── tests/
 │   ├── smoke_test.cpp       # Cross-module compilation & behavior smoke tests
 │   ├── odr_two_tu_main.cpp # Two-TU ODR regression (links 2 TUs w/ all headers)
@@ -52,6 +53,11 @@ Raspberry Pi), macOS, and WSL.
 └── docs/
     └── RASPBERRY_PI.md   # Raspberry Pi build & deployment guide
 ```
+
+The `core/` directory is a header-only interface library (`voxelcore` in
+CMake, `-Icore` in the Makefile): bare includes like `#include "math.hpp"`
+resolve from any TU in the repo via that include path, so new code under
+`perception/`, `control/`, etc. does not need path rewrites.
 
 ## Quick Start
 

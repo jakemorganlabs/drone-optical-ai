@@ -27,30 +27,75 @@ else()
     message(WARNING "OpenMP not found - parallelization will be disabled (single-threaded fallback)")
 endif()
 
-# Include directories
-include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+#------------------------------------------------
+# Header-only interface library: voxelcore
+# Phase-0 headers (math/grid/pose/motion/ray_marching/clustering/navigation)
+# live in core/. Including "math.hpp" etc. bare works from any TU because core/
+# is on the include path.
+#------------------------------------------------
+add_library(voxelcore INTERFACE)
+target_include_directories(voxelcore INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/core)
 
-# Common headers
+# Common headers (now under core/)
 set(COMMON_HEADERS
-    math.hpp
-    grid.hpp
-    pose.hpp
-    motion.hpp
-    ray_marching.hpp
-    clustering.hpp
-    navigation.hpp
+    core/math.hpp
+    core/grid.hpp
+    core/pose.hpp
+    core/motion.hpp
+    core/ray_marching.hpp
+    core/clustering.hpp
+    core/navigation.hpp
 )
 
 #------------------------------------------------
 # Core executable: live voxel mapper
 #------------------------------------------------
 add_executable(embedded_voxel_mapper
-    live_voxel_mapper.cpp
+    core/live_voxel_mapper.cpp
     ${COMMON_HEADERS}
 )
-target_include_directories(embedded_voxel_mapper PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(embedded_voxel_mapper PRIVATE voxelcore)
 if(OpenMP_CXX_FOUND)
-    target_link_libraries(embedded_voxel_mapper OpenMP::OpenMP_CXX)
+    target_link_libraries(embedded_voxel_mapper PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
+#------------------------------------------------
+# onboard pilot_main: Phase-1 stub main + perception TU, plus the optional
+# MAVSDK FcBridge TU when libmavsdk is available.
+#
+# The stub always builds (gives the perception TU a link entry point and keeps
+# the two-TU ODR gate honest). The FcBridge TU is only added when MAVSDK is
+# found; otherwise it is silently omitted with a status message, mirroring the
+# ray_voxel_legacy / nlohmann-json guard. A fresh `make` without MAVSDK still
+# produces a working stub pilot_main binary.
+#------------------------------------------------
+find_package(MAVSDK QUIET)
+set(PILOT_SOURCES
+    control/pilot_main.cpp
+    perception/drone_pose_provider.cpp
+)
+if(MAVSDK_FOUND)
+    list(APPEND PILOT_SOURCES control/fc_bridge/fc_bridge.cpp)
+endif()
+
+add_executable(pilot_main ${PILOT_SOURCES})
+target_link_libraries(pilot_main PRIVATE voxelcore)
+target_include_directories(pilot_main PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/control/fc_bridge
+)
+if(MAVSDK_FOUND)
+    target_link_libraries(pilot_main PRIVATE MAVSDK::mavsdk)
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(pilot_main PRIVATE OpenMP::OpenMP_CXX)
+    endif()
+    message(STATUS "Building pilot_main with FcBridge (MAVSDK found)")
+else()
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(pilot_main PRIVATE OpenMP::OpenMP_CXX)
+    endif()
+    message(STATUS "Building pilot_main stub (MAVSDK not found; FcBridge omitted)")
 endif()
 
 #------------------------------------------------
@@ -66,10 +111,11 @@ check_include_file_cxx("stb_image.h" HAVE_STB_IMAGE)
 set(CMAKE_REQUIRED_INCLUDES "")
 
 if(HAVE_NLOHMANN_JSON AND HAVE_STB_IMAGE)
-    add_executable(ray_voxel_legacy ray_voxel.cpp)
+    add_executable(ray_voxel_legacy core/ray_voxel.cpp)
+    target_link_libraries(ray_voxel_legacy PRIVATE voxelcore)
     target_include_directories(ray_voxel_legacy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
     if(OpenMP_CXX_FOUND)
-        target_link_libraries(ray_voxel_legacy OpenMP::OpenMP_CXX)
+        target_link_libraries(ray_voxel_legacy PRIVATE OpenMP::OpenMP_CXX)
     endif()
     message(STATUS "Building ray_voxel_legacy (third_party deps available)")
 else()
@@ -81,18 +127,39 @@ endif()
 # Tests: cross-header smoke tests + two-TU ODR regression
 #------------------------------------------------
 add_executable(smoke_test tests/smoke_test.cpp)
-target_include_directories(smoke_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(smoke_test PRIVATE voxelcore)
 if(OpenMP_CXX_FOUND)
-    target_link_libraries(smoke_test OpenMP::OpenMP_CXX)
+    target_link_libraries(smoke_test PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
 # Two-TU ODR regression: link two translation units that both include every
 # header. Before the inline fixes this failed to link (multiply-defined free
 # functions). Keeps the gate closed on a whole class of regressions.
 add_executable(odr_two_tu tests/odr_two_tu_main.cpp tests/odr_two_tu_other.cpp)
-target_include_directories(odr_two_tu PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(odr_two_tu PRIVATE voxelcore)
 if(OpenMP_CXX_FOUND)
-    target_link_libraries(odr_two_tu OpenMP::OpenMP_CXX)
+    target_link_libraries(odr_two_tu PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
+# Failsafe state-machine unit tests (Part 7). Header-only failsafe.hpp, so the
+# test is a single self-contained TU just like smoke_test.
+add_executable(failsafe_test tests/failsafe_test.cpp)
+target_link_libraries(failsafe_test PRIVATE voxelcore)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(failsafe_test PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
+# Phase 1 perception compile/link gate. Links tests/perception_compile_test.cpp
+# against the perception TU (perception/drone_pose_provider.cpp) so the new
+# headers + TU are exercised. Implicitly also a small two-TU ODR check for
+# the perception code.
+add_executable(perception_compile_test
+    tests/perception_compile_test.cpp
+    perception/drone_pose_provider.cpp
+)
+target_link_libraries(perception_compile_test PRIVATE voxelcore)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(perception_compile_test PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
 #------------------------------------------------
@@ -112,6 +179,8 @@ add_test(NAME EmbeddedMapperSmokeTest
 )
 add_test(NAME SmokeUnitTest  COMMAND smoke_test)
 add_test(NAME OdrTwoTuTest   COMMAND odr_two_tu)
+add_test(NAME FailsafeTest   COMMAND failsafe_test)
+add_test(NAME PerceptionCompileTest COMMAND perception_compile_test)
 
 # Custom target for cleaning generated files
 add_custom_target(clean-all

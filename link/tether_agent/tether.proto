@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package dronectl.tether;
+
+// Fiber-optic tether datalink between the onboard pilot (Pi) and the
+// ground box / coordinator. Bidi streaming: telemetry up, commands down.
+//
+// This .proto is the *eventual* gRPC contract per manual Part 5.2. The
+// Phase 4 scaffold (link/tether_agent/tether_agent.cpp) does NOT yet
+// compile or run protobuf/grpc — it speaks a plain JSON-line TCP transport
+// with identical field semantics so the link can be exercised today
+// with zero extra deps. See tether_agent.hpp and README.md.
+//
+//   TODO(phase5): swap to gRPC + protobuf once deps are vendored.
+
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
+service Tether {
+  // Bidirectional stream. Client (ground) opens the RPC; drone streams
+  // DroneState up, ground streams GroundCommand down on the same call.
+  rpc Telemetry(stream DroneState) returns (stream GroundCommand);
+}
+
+// ---------------------------------------------------------------------------
+// Top-level messages
+// ---------------------------------------------------------------------------
+message DroneState {
+  string        drone_id   = 1;
+  Pose          pose       = 2;
+  float         battery    = 3;   // 0.0..1.0 (fraction of full charge)
+  bytes         map_delta  = 4;   // occupancy-grid delta blob (opaque)
+  FailsafeState state      = 5;   // mirror of control/failsafe.hpp state
+}
+
+message GroundCommand {
+  oneof c {
+    Waypoint        goal   = 1;
+    TeleopVelocity  teleop = 2;
+    Kill            kill   = 3;   // highest priority, never gated
+    ModeChange      mode   = 4;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sub-messages
+// ---------------------------------------------------------------------------
+message Pose {
+  double x     = 1;
+  double y     = 2;
+  double z     = 3;
+  double yaw   = 4;   // deg
+  double pitch = 5;   // deg
+  double roll  = 6;   // deg
+}
+
+message Waypoint {
+  Pose   pose = 1;   // target pose (position + optional attitude)
+  string id   = 2;   // idempotent goal id for dedup on reconnect
+}
+
+message TeleopVelocity {
+  float vx       = 1;  // body-frame, m/s
+  float vy       = 2;
+  float vz       = 3;
+  float yaw_rate = 4;  // deg/s
+}
+
+message Kill {
+  // Empty body — kill is unconditional. `reason` is informational only.
+  string reason = 1;
+}
+
+message ModeChange {
+  enum Mode {
+    MODE_UNSPECIFIED = 0;
+    AUTONOMOUS       = 1;
+    TELEOP           = 2;
+    IDLE             = 3;
+  }
+  Mode mode = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+enum FailsafeState {
+  FAILSAFE_UNSPECIFIED = 0;
+  BOOT                 = 1;
+  IDLE                 = 2;
+  ARMED                = 3;
+  AUTONOMOUS           = 4;
+  TELEOP               = 5;
+  LINK_LOSS            = 6;
+  RTL                  = 7;   // return-to-launch
+  LANDING              = 8;
+  FAULT                = 9;
+}

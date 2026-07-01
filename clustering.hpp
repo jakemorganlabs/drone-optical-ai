@@ -266,28 +266,31 @@ private:
         return neighbors;
     }
     
-    // Expand cluster recursively
-    void expand_cluster(int voxel_idx, std::vector<int>& neighbors, VoxelCluster& cluster,
+    // Expand cluster (BFS-style). Index-based loop tolerates `neighbors`
+    // growth — a range-for here would be UB (iterator invalidation on push_back).
+    void expand_cluster(int start_idx, std::vector<int> neighbors, VoxelCluster& cluster,
                        const DualVoxelGrid& grid, float intensity_threshold) {
-        cluster.voxel_indices.push_back(voxel_idx);
-        
-        for(int neighbor_idx : neighbors) {
+        cluster.voxel_indices.push_back(start_idx);
+
+        // `visited[start_idx]` is set by the caller (find_clusters).
+        for(size_t i = 0; i < neighbors.size(); ++i) {
+            int neighbor_idx = neighbors[i];
             if(visited[neighbor_idx]) continue;
-            
+
             visited[neighbor_idx] = true;
-            
+
             // Find neighbors of this neighbor
             std::vector<int> neighbor_neighbors = find_neighbors(neighbor_idx, grid, intensity_threshold);
-            
-            if(neighbor_neighbors.size() >= min_points) {
-                // Add new neighbors to the list
+
+            if(static_cast<int>(neighbor_neighbors.size()) >= min_points) {
+                // Add new neighbors to the list — safe under index-based iteration
                 for(int new_neighbor : neighbor_neighbors) {
                     if(std::find(neighbors.begin(), neighbors.end(), new_neighbor) == neighbors.end()) {
                         neighbors.push_back(new_neighbor);
                     }
                 }
             }
-            
+
             // Add to cluster
             cluster.voxel_indices.push_back(neighbor_idx);
         }

@@ -126,6 +126,10 @@ public:
 //----------------------------------------------
 // Mock Pose Provider (for testing/development)
 //----------------------------------------------
+// Dev provider that synthesizes a moving camera and a few bright "pillars"
+// at fixed world spots so the ray-caster has real structure to accumulate.
+// Future hardware providers (DronePoseProvider) implement the same interface
+// but source frames from libcamera/depth SDKs and pose from the FC bridge.
 class MockPoseProvider : public PoseProvider {
 private:
     PoseCallback pose_callback;
@@ -133,49 +137,49 @@ private:
     bool active;
     Pose current_pose;
     CameraFrame current_frame;
-    
+    float angle_ = 0.0f;   // instance state (no function-local static)
+
 public:
     MockPoseProvider() : active(false) {
-        // Initialize with default values
         current_pose = Pose(Vec3(0, 0, 10), 0, 0, 0);
         current_frame = CameraFrame(640, 480, 60.0f);
         current_frame.camera_pose = current_pose;
     }
-    
+
     void register_pose_callback(PoseCallback callback) override {
         pose_callback = callback;
     }
-    
+
     void register_frame_callback(FrameCallback callback) override {
         frame_callback = callback;
     }
-    
+
     bool start() override {
         active = true;
         return true;
     }
-    
+
     void stop() override {
         active = false;
     }
-    
+
     bool is_active() const override {
         return active;
     }
-    
+
     bool get_latest_pose(Pose& pose) const override {
         if(!active) return false;
         pose = current_pose;
         return true;
     }
-    
+
     bool get_latest_frame(CameraFrame& frame) const override {
         if(!active) return false;
         frame = current_frame;
         return true;
     }
-    
-    // Mock methods for testing
+
+    // Externally driven pose update (still supported for tests)
     void update_pose(const Pose& new_pose) {
         current_pose = new_pose;
         current_frame.camera_pose = new_pose;
@@ -183,31 +187,62 @@ public:
             pose_callback(new_pose);
         }
     }
-    
+
+    // Externally driven frame update (still supported for tests)
     void update_frame(const CameraFrame& new_frame) {
         current_frame = new_frame;
         if(frame_callback && active) {
             frame_callback(new_frame);
         }
     }
-    
-    // Simulate drone movement
+
+    // Advance the synthetic scene by dt seconds. The camera orbits at z=10
+    // looking straight down world -Z (identity rotation, since this codebase's
+    // yaw rotates around Z and doesn't steer the horizontal gaze). Pillars sit
+    // on the ground (z=0) within the FOV, so the ray-caster accumulates real
+    // occupancy and the motion detector sees frame-to-frame change as the
+    // camera translates.
     void simulate_movement(float dt) {
         if(!active) return;
-        
-        // Simple circular motion
-        static float angle = 0.0f;
-        angle += 0.1f * dt;  // 0.1 rad/s
-        
-        current_pose.position.x = 10.0f * std::cos(angle);
-        current_pose.position.y = 10.0f * std::sin(angle);
-        current_pose.position.z = 10.0f;
-        current_pose.yaw = rad2deg(angle);
-        
+        angle_ += 0.3f * dt;
+
+        // Small orbit in XY at z=10; identity rotation means forward = world -Z.
+        current_pose.position = Vec3(2.0f * std::cos(angle_),
+                                     2.0f * std::sin(angle_), 10.0f);
+        current_pose.yaw = 0.0f;
+        current_pose.pitch = 0.0f;
+        current_pose.roll = 0.0f;
+        current_pose.timestamp = std::chrono::steady_clock::now();
         current_frame.camera_pose = current_pose;
-        
-        if(pose_callback) {
-            pose_callback(current_pose);
+
+        // Splat a few bright pillars at fixed world spots on the ground. FOV is
+        // 60deg, so at depth 10m the visible XY radius is 10*tan(30) ~= 5.8m;
+        // all pillars below sit inside that disc and move in the image as the
+        // camera orbits.
+        std::fill(current_frame.pixels.begin(), current_frame.pixels.end(), 0.0f);
+        const Vec3 pillars[] = {
+            { 2.0f,  0.0f, 0.0f}, {-2.0f,  0.0f, 0.0f},
+            { 0.0f,  2.0f, 0.0f}, { 0.0f, -2.0f, 0.0f},
+            { 2.0f,  2.0f, 0.0f}, {-2.0f, -2.0f, 0.0f},
+            { 3.0f, -1.0f, 0.0f}, {-1.0f,  3.0f, 0.0f}
+        };
+        Mat3 R = transpose(current_pose.get_rotation_matrix());
+        const float f = current_frame.get_focal_length();
+        for(const Vec3& p : pillars) {
+            Vec3 rel = mat3_mul_vec3(R, p - current_pose.position);
+            if(rel.z >= -0.5f) continue;                   // behind / at camera plane
+            int u = int(0.5f * current_frame.width  + f * (rel.x / -rel.z));
+            int v = int(0.5f * current_frame.height - f * (rel.y / -rel.z));
+            for(int dv = -6; dv <= 6; ++dv)
+              for(int du = -6; du <= 6; ++du) {
+                int uu = u+du, vv = v+dv;
+                if(uu>=0 && uu<current_frame.width && vv>=0 && vv<current_frame.height)
+                  current_frame.pixels[current_frame.get_index(uu,vv)] = 1.0f;
+              }
         }
+        current_frame.timestamp = current_pose.timestamp;
+
+        if(pose_callback)  pose_callback(current_pose);
+        if(frame_callback) frame_callback(current_frame);   // <-- drives the pipeline
     }
 };

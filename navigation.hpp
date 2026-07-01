@@ -311,19 +311,21 @@ public:
         : max_velocity(max_vel), max_acceleration(max_acc), 
           planning_horizon(horizon), replan_rate(replan) {}
     
-    // Plan path to goal
+    // Plan path to goal using A* over the costmap. Falls back to a straight-line
+    // march if A* finds no route (e.g. goal enclosed). Returns waypoints with
+    // velocity profiles. The deterministic failsafe (Part 7) and the CfC
+    // imitation dataset (Part 4) both consume this.
     std::vector<NavigationWaypoint> plan_path(const NavigationCostmap& costmap,
                                              const Vec3& start_pos,
                                              const Vec3& goal_pos,
                                              const Vec3& current_velocity = Vec3(0,0,0)) {
-        // Simple A* pathfinding
-        auto path = astar_pathfinding(costmap, start_pos, goal_pos);
-        
+        std::vector<Vec3> path = astar_pathfinding(costmap, start_pos, goal_pos);
+        if(path.empty()) {
+            path = greedy_straight_line_planner(costmap, start_pos, goal_pos);
+        }
         if(path.empty()) {
             return std::vector<NavigationWaypoint>();
         }
-        
-        // Convert path to waypoints with velocity profiles
         return generate_waypoints(path, current_velocity);
     }
     
@@ -362,40 +364,141 @@ public:
     }
     
 private:
-    // A* pathfinding implementation
+    // A* over the 2D occupancy costmap. 8-connected, octile heuristic,
+    // step cost = resolution * (1 + cell cost); occupied cells are
+    // impassable. Returns an empty path if no route exists.
     std::vector<Vec3> astar_pathfinding(const NavigationCostmap& costmap,
                                        const Vec3& start_pos,
                                        const Vec3& goal_pos) {
-        // This is a simplified A* implementation
-        // In practice, you'd want a more robust pathfinding library
-        
+        int W = costmap.get_width();
+        int H = costmap.get_height();
+        if(W <= 0 || H <= 0) return {};
+
+        int sx, sy, gx, gy;
+        costmap.world_to_grid(start_pos, sx, sy);
+        costmap.world_to_grid(goal_pos, gx, gy);
+
+        // Clamp start/goal into the costmap (they can be marginally out of
+        // bounds because world_to_grid does no clamping).
+        sx = std::max(0, std::min(sx, W - 1));
+        sy = std::max(0, std::min(sy, H - 1));
+        gx = std::max(0, std::min(gx, W - 1));
+        gy = std::max(0, std::min(gy, H - 1));
+
+        if(costmap.is_occupied(sx, sy) || costmap.is_occupied(gx, gy)) {
+            return {};  // start or goal inside an obstacle -> no A* route
+        }
+
+        const int N = W * H;
+        struct Node {
+            float g = std::numeric_limits<float>::infinity();
+            float f = std::numeric_limits<float>::infinity();
+            int came_from = -1;
+        };
+        std::vector<Node> nodes(N);
+
+        auto idx = [&](int x, int y){ return y * W + x; };
+
+        // Priority queue ordered by f = g + h
+        auto cmp = [&](int a, int b){ return nodes[a].f > nodes[b].f; };
+        std::priority_queue<int, std::vector<int>, decltype(cmp)> open(cmp);
+
+        const int start_idx = idx(sx, sy);
+        nodes[start_idx].g = 0.0f;
+        nodes[start_idx].f = octile_heuristic(sx, sy, gx, gy, costmap.get_resolution());
+        open.push(start_idx);
+
+        const int dx8[8] = {1, -1, 0,  0, 1, 1, -1, -1};
+        const int dy8[8] = {0,  0, 1, -1, 1, -1, 1, -1};
+
+        std::vector<bool> closed(N, false);
+        bool found = false;
+
+        while(!open.empty()) {
+            int cur = open.top(); open.pop();
+            if(closed[cur]) continue;
+            closed[cur] = true;
+
+            int cx = cur % W;
+            int cy = cur / W;
+            if(cx == gx && cy == gy) { found = true; break; }
+
+            for(int k = 0; k < 8; ++k) {
+                int nx = cx + dx8[k];
+                int ny = cy + dy8[k];
+                if(nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+                if(costmap.is_occupied(nx, ny)) continue;
+
+                // Prevent corner-cutting through diagonally adjacent obstacles
+                if(k >= 4) {
+                    if(costmap.is_occupied(cx + dx8[k], cy) ||
+                       costmap.is_occupied(cx, cy + dy8[k])) continue;
+                }
+
+                int nidx = idx(nx, ny);
+                if(closed[nidx]) continue;
+
+                float step = costmap.get_resolution();
+                if(dx8[k] != 0 && dy8[k] != 0) step *= 1.41421356f;  // sqrt(2)
+                float cost = step * (1.0f + costmap.get_cost(nx, ny));
+                float tentative_g = nodes[cur].g + cost;
+
+                if(tentative_g < nodes[nidx].g) {
+                    nodes[nidx].g = tentative_g;
+                    nodes[nidx].f = tentative_g + octile_heuristic(nx, ny, gx, gy, costmap.get_resolution());
+                    nodes[nidx].came_from = cur;
+                    open.push(nidx);
+                }
+            }
+        }
+
+        if(!found) return {};
+
+        // Reconstruct from goal -> start, then reverse
+        std::vector<Vec3> path;
+        int cur = idx(gx, gy);
+        while(cur != -1) {
+            int x = cur % W;
+            int y = cur / W;
+            path.push_back(costmap.grid_to_world(x, y));
+            cur = nodes[cur].came_from;
+        }
+        std::reverse(path.begin(), path.end());
+        return path;
+    }
+
+    // Octile heuristic for an 8-connected uniform-cost 2D grid
+    static float octile_heuristic(int ax, int ay, int bx, int by, float res) {
+        int dx = std::abs(ax - bx);
+        int dy = std::abs(ay - by);
+        float D = res;
+        float D2 = res * 1.41421356f;
+        return D * (dx + dy) + (D2 - 2.0f * D) * static_cast<float>(std::min(dx, dy));
+    }
+
+    // Deterministic greedy straight-line march. Used as a fallback when A*
+    // returns no path, and as the imitation target for the CfC pilot (Part 4).
+    std::vector<Vec3> greedy_straight_line_planner(const NavigationCostmap& costmap,
+                                                   const Vec3& start_pos,
+                                                   const Vec3& goal_pos) {
         std::vector<Vec3> path;
         path.push_back(start_pos);
-        
-        // For now, return a simple straight-line path
-        // In a real implementation, this would use A* to find the optimal path
-        // avoiding obstacles based on the costmap
-        
+
         Vec3 direction = normalize(goal_pos - start_pos);
         float distance = length(goal_pos - start_pos);
-        float step_size = 1.0f; // 1m steps
-        
+        float step_size = costmap.get_resolution();  // costmap-resolution steps
+
         for(float d = step_size; d < distance; d += step_size) {
             Vec3 waypoint = start_pos + direction * d;
-            
-            // Check if waypoint is valid (not in obstacle)
             int grid_x, grid_y;
             costmap.world_to_grid(waypoint, grid_x, grid_y);
-            
             if(!costmap.is_occupied(grid_x, grid_y)) {
                 path.push_back(waypoint);
             } else {
-                // Find alternative path around obstacle
-                // This is simplified - real implementation would need proper obstacle avoidance
-                break;
+                break;  // obstacle blocks the straight route; path stops short
             }
         }
-        
+
         path.push_back(goal_pos);
         return path;
     }

@@ -36,12 +36,12 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 # Embedded target (live camera operation)
-$(EMBEDDED_TARGET): $(LIVE_MAPPER_SRC) $(COMMON_HEADERS)
+$(EMBEDDED_TARGET): $(LIVE_MAPPER_SRC) $(COMMON_HEADERS) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(RELEASE_FLAGS) -o $@ $(LIVE_MAPPER_SRC)
 
 # Legacy target (optional, requires third_party/ deps)
 legacy: $(BUILD_DIR) $(LEGACY_TARGET)
-$(LEGACY_TARGET): $(LEGACY_SRC) $(COMMON_HEADERS)
+$(LEGACY_TARGET): $(LEGACY_SRC) $(COMMON_HEADERS) | $(BUILD_DIR)
 	@echo "Attempting legacy build (requires third_party/nlohmann/json.hpp and third_party/stb_image.h)..."
 	@$(CXX) $(CXXFLAGS) $(RELEASE_FLAGS) -Ithird_party -o $@ $(LEGACY_SRC) 2>/dev/null || \
 		echo "  skipped: third_party deps missing. See third_party/README.md"
@@ -68,18 +68,26 @@ clean:
 distclean: clean
 	rm -f *.bin *.log *.out
 
-# Quick smoke test - launch mapper and terminate after 3 seconds
-test: $(EMBEDDED_TARGET)
-	@echo "Running smoke test (3s)..."
-	@timeout 3 $(EMBEDDED_TARGET) || (sleep 3 && pkill -f embedded_voxel_mapper || true)
-	@echo "Smoke test completed"
+# Quick smoke test - launch mapper for 2 seconds and check it produced frames
+test: $(EMBEDDED_TARGET) $(BUILD_DIR)/smoke_test $(BUILD_DIR)/odr_two_tu
+	@echo "Running smoke test (mapper 2s)..."
+	@./$(EMBEDDED_TARGET) --duration 2 --grid 48 --out $(BUILD_DIR)/make_ci_grid.bin > $(BUILD_DIR)/mapper.log 2>&1
+	@grep -q "Total frames: [1-9]" $(BUILD_DIR)/mapper.log || { echo "FAIL: no frames processed"; cat $(BUILD_DIR)/mapper.log; exit 1; }
+	@echo "Running unit smoke tests..."
+	@./$(BUILD_DIR)/smoke_test
+	@echo "Running two-TU ODR regression test..."
+	@./$(BUILD_DIR)/odr_two_tu
+	@echo "All smoke tests passed."
 
-# Python bindings
-python-setup:
-	pip install -e .
+# Unit smoke test binary (cross-header behavior checks)
+$(BUILD_DIR)/smoke_test: tests/smoke_test.cpp $(COMMON_HEADERS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(RELEASE_FLAGS) -I. -o $@ tests/smoke_test.cpp
 
-python-embedded:
-	BUILD_EMBEDDED=1 pip install -e .
+# Two-TU ODR regression: two TUs including all headers must link cleanly
+$(BUILD_DIR)/odr_two_tu: tests/odr_two_tu_main.cpp tests/odr_two_tu_other.cpp $(COMMON_HEADERS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(RELEASE_FLAGS) -I. -c tests/odr_two_tu_other.cpp -o $(BUILD_DIR)/odr_other.o
+	$(CXX) $(CXXFLAGS) $(RELEASE_FLAGS) -I. -c tests/odr_two_tu_main.cpp  -o $(BUILD_DIR)/odr_main.o
+	$(CXX) $(OPENMP_FLAGS) -o $@ $(BUILD_DIR)/odr_main.o $(BUILD_DIR)/odr_other.o
 
 # Documentation
 docs:
@@ -102,8 +110,6 @@ help:
 	@echo "  install      - Install to $(INSTALL_DIR)"
 	@echo "  uninstall    - Remove from $(INSTALL_DIR)"
 	@echo "  clean        - Clean build artifacts"
-	@echo "  python-setup - Build Python bindings (desktop)"
-	@echo "  python-embedded - Build Python bindings (embedded)"
 	@echo "  docs         - Generate Doxygen docs"
 	@echo "  help         - Show this help"
 	@echo ""
@@ -113,4 +119,4 @@ help:
 	@echo "  BUILD_DIR    - Build directory (default: build)"
 	@echo "  INSTALL_DIR  - Install directory (default: /usr/local)"
 
-.PHONY: all debug legacy install uninstall clean distclean test python-setup python-embedded docs help
+.PHONY: all debug legacy install uninstall clean distclean test docs help

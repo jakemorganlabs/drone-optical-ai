@@ -22,7 +22,7 @@ struct RayStep {
 //----------------------------------------------
 // Ray-AABB Intersection
 //----------------------------------------------
-bool ray_aabb_intersection(
+inline bool ray_aabb_intersection(
     const Vec3& ray_origin,
     const Vec3& ray_direction,
     const Vec3& box_min,
@@ -69,7 +69,7 @@ bool ray_aabb_intersection(
 //----------------------------------------------
 // Distance-Aware Weighting
 //----------------------------------------------
-float compute_distance_weight(float distance, float focal_length, float voxel_size, float min_weight = 0.1f) {
+inline float compute_distance_weight(float distance, float focal_length, float voxel_size, float min_weight = 0.1f) {
     // Solid angle model: weight ∝ 1/distance²
     // But we need to account for voxel size and focal length
     float solid_angle_weight = 1.0f / (1.0f + distance * distance);
@@ -84,7 +84,7 @@ float compute_distance_weight(float distance, float focal_length, float voxel_si
 //----------------------------------------------
 // Ray Casting into Grid
 //----------------------------------------------
-std::vector<RayStep> cast_ray_into_grid(
+inline std::vector<RayStep> cast_ray_into_grid(
     const Vec3& camera_pos, 
     const Vec3& dir_normalized, 
     const DualVoxelGrid& grid,
@@ -185,7 +185,7 @@ std::vector<RayStep> cast_ray_into_grid(
 //----------------------------------------------
 // Optimized Ray Casting with Early Exit
 //----------------------------------------------
-std::vector<RayStep> cast_ray_into_grid_optimized(
+inline std::vector<RayStep> cast_ray_into_grid_optimized(
     const Vec3& camera_pos, 
     const Vec3& dir_normalized, 
     const DualVoxelGrid& grid,
@@ -293,7 +293,7 @@ struct BatchRayResult {
     BatchRayResult(int u, int v, float val) : pixel_u(u), pixel_v(v), pixel_value(val) {}
 };
 
-std::vector<BatchRayResult> cast_rays_batch(
+inline std::vector<BatchRayResult> cast_rays_batch(
     const std::vector<std::pair<int, int>>& pixel_coords,
     const std::vector<float>& pixel_values,
     const Vec3& camera_pos,

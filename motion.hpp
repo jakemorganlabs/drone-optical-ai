@@ -100,7 +100,7 @@ struct ImageGray {
 
 // Detect motion by absolute difference
 // Returns a boolean mask + the difference for each pixel
-MotionMask detect_motion(const ImageGray &prev, const ImageGray &next, float threshold) {
+inline MotionMask detect_motion(const ImageGray &prev, const ImageGray &next, float threshold) {
     MotionMask mm;
     if(!prev.same_dimensions(next)) {
         std::cerr << "Images differ in size. Can't do motion detection!\n";
@@ -122,7 +122,7 @@ MotionMask detect_motion(const ImageGray &prev, const ImageGray &next, float thr
 }
 
 // Adaptive threshold based on image statistics
-float compute_adaptive_threshold(const ImageGray &prev, const ImageGray &next, 
+inline float compute_adaptive_threshold(const ImageGray &prev, const ImageGray &next, 
                                 float base_threshold = 2.0f, float percentile = 95.0f) {
     if(!prev.same_dimensions(next)) {
         return base_threshold;
@@ -153,14 +153,14 @@ float compute_adaptive_threshold(const ImageGray &prev, const ImageGray &next,
 }
 
 // Motion detection with adaptive threshold
-MotionMask detect_motion_adaptive(const ImageGray &prev, const ImageGray &next, 
+inline MotionMask detect_motion_adaptive(const ImageGray &prev, const ImageGray &next, 
                                  float base_threshold = 2.0f, float percentile = 95.0f) {
     float threshold = compute_adaptive_threshold(prev, next, base_threshold, percentile);
     return detect_motion(prev, next, threshold);
 }
 
 // Motion detection with noise filtering
-MotionMask detect_motion_filtered(const ImageGray &prev, const ImageGray &next, 
+inline MotionMask detect_motion_filtered(const ImageGray &prev, const ImageGray &next, 
                                  float threshold, int min_region_size = 4) {
     MotionMask mm = detect_motion(prev, next, threshold);
     
@@ -210,7 +210,7 @@ struct MotionStats {
                     max_diff(0.0f), mean_diff(0.0f), std_diff(0.0f) {}
 };
 
-MotionStats compute_motion_stats(const MotionMask& mm) {
+inline MotionStats compute_motion_stats(const MotionMask& mm) {
     MotionStats stats;
     stats.total_pixels = mm.width * mm.height;
     stats.changed_pixels = mm.count_changed();

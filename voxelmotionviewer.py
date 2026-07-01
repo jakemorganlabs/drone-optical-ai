@@ -25,50 +25,80 @@ import numpy as np
 import pyvista as pv
 
 
-def load_voxel_grid(filename):
+def load_voxel_grid(filename, grid_index=0):
     """
-    Reads a voxel grid from a binary file with the following layout:
-      1) int32: N (size of the NxNxN grid)
-      2) float32: voxel_size
-      3) N*N*N float32: the voxel data in row-major order
-    Returns:
-       voxel_grid (N x N x N),
-       voxel_size
+    Reads a voxel grid written by LiveVoxelMapper::save_voxel_grid.
+
+    Container layout (VXG1, little-endian):
+      4 bytes  magic = b"VXG1"
+      int32    N (grid size, NxNxN)
+      float32  voxel_size (meters)
+      int32    num_grids  (number of N^3 float32 blocks that follow)
+      num_grids * N*N*N float32  voxel data, row-major with index
+                               voxel_idx = ix*N*N + iy*N + iz
+    Index in the returned ndarray is therefore voxel[ix, iy, iz].
+
+    grid_index selects which grid to return:
+      0 = dynamic, 1 = static (when present).
+
+    Returns (voxel_grid (N,N,N) float32, voxel_size float, num_grids int).
     """
     with open(filename, "rb") as f:
-        # read N
-        raw = f.read(4)
-        N = np.frombuffer(raw, dtype=np.int32)[0]
+        magic = f.read(4)
+        if magic != b"VXG1":
+            raise ValueError(
+                f"Unsupported voxel file magic {magic!r}; expected b'VXG1'. "
+                "Re-save with the current LiveVoxelMapper::save_voxel_grid.")
+        N = int.from_bytes(f.read(4), "little")
+        voxel_size = float(np.frombuffer(f.read(4), dtype="<f4")[0])
+        num_grids = int.from_bytes(f.read(4), "little")
 
-        # read voxel_size
-        raw = f.read(4)
-        voxel_size = np.frombuffer(raw, dtype=np.float32)[0]
+        if grid_index < 0 or grid_index >= num_grids:
+            raise IndexError(
+                f"grid_index {grid_index} out of range for file with {num_grids} grids")
 
-        # read the voxel data
-        count = N*N*N
-        raw = f.read(count*4)
-        data = np.frombuffer(raw, dtype=np.float32)
+        block_bytes = N * N * N * 4
+        # Skip to the requested grid block
+        f.read(block_bytes * grid_index)
+        data = np.frombuffer(f.read(block_bytes), dtype="<f4")
         voxel_grid = data.reshape((N, N, N))
 
-    return voxel_grid, voxel_size
+    return voxel_grid, voxel_size, num_grids
+
+
+def load_voxel_grid_v0(filename):
+    """Legacy single-grid reader kept for backwards compatibility:
+    int32 N | float32 voxel_size | N^3 float32. Auto-detects VXG1 too."""
+    with open(filename, "rb") as f:
+        head = f.read(4)
+        f.seek(0)
+        if head == b"VXG1":
+            grid, vs, _ = load_voxel_grid(filename)
+            return grid, vs
+        N = int.from_bytes(f.read(4), "little")
+        voxel_size = float(np.frombuffer(f.read(4), dtype="<f4")[0])
+        data = np.frombuffer(f.read(N * N * N * 4), dtype="<f4")
+    return data.reshape((N, N, N)), voxel_size
 
 
 def extract_top_percentile_z_up(voxel_grid, voxel_size, grid_center,
-                                percentile=99.5, use_hard_thresh=False, hard_thresh=700):
+                                percentile=99.5, use_hard_thresh=False, hard_thresh=700,
+                                axis_order="xyz"):
     """
     Extract the top 'percentile' bright voxels (or above 'hard_thresh').
-    We interpret the array shape as (Z, Y, X).
 
-    index: voxel[z, y, x]
+    The C++ writer stores voxels row-major as voxel_idx = ix*N*N + iy*N + iz,
+    so after reshape((N,N,N)) the natural index is voxel[ix, iy, iz].
+    axis_order="xyz" (default, matches current C++ writer): voxel[ix, iy, iz].
+    axis_order="zyx" (legacy behaviour): voxel[z, y, x].
 
-    We'll produce an Nx3 array of points in (x, y, z).
-    Then we'll produce intensities as a separate array.
+    Output is an Nx3 array of points in (x, y, z) world coords plus the
+    intensities array.
     """
-    N = voxel_grid.shape[0]  # assume shape is (N,N,N)
+    N = voxel_grid.shape[0]
     half_side = (N * voxel_size) * 0.5
     grid_min = grid_center - half_side
 
-    # Flatten to find threshold
     flat_vals = voxel_grid.ravel()
     if use_hard_thresh:
         thresh = hard_thresh
@@ -82,12 +112,15 @@ def extract_top_percentile_z_up(voxel_grid, voxel_size, grid_center,
 
     intensities = voxel_grid[coords[:, 0], coords[:, 1], coords[:, 2]]
 
-    # Because we're now treating 0 -> z, 1 -> y, 2 -> x:
-    z_idx = coords[:, 0] + 0.5
-    y_idx = coords[:, 1] + 0.5
-    x_idx = coords[:, 2] + 0.5
+    if axis_order == "xyz":
+        x_idx = coords[:, 0] + 0.5
+        y_idx = coords[:, 1] + 0.5
+        z_idx = coords[:, 2] + 0.5
+    else:
+        z_idx = coords[:, 0] + 0.5
+        y_idx = coords[:, 1] + 0.5
+        x_idx = coords[:, 2] + 0.5
 
-    # Convert to world coords
     x_world = grid_min[0] + x_idx * voxel_size
     y_world = grid_min[1] + y_idx * voxel_size
     z_world = grid_min[2] + z_idx * voxel_size
@@ -159,15 +192,18 @@ def get_next_image_index(folder, prefix="voxel_", suffix=".png"):
 
 
 def main():
-    # 1) Load the voxel grid
-    voxel_grid, vox_size = load_voxel_grid("voxel_grid.bin")
-    print("Loaded voxel grid:", voxel_grid.shape, "voxel_size=", vox_size)
+    # 1) Load the voxel grid (defaults to the dynamic grid; pass grid_index=1 for static)
+    voxel_grid, vox_size, num_grids = load_voxel_grid("voxel_grid.bin")
+    print("Loaded voxel grid:", voxel_grid.shape, "voxel_size=", vox_size,
+          "grids=", num_grids)
     print("Max voxel value:", voxel_grid.max())
 
-    # 2) Define the grid center (x,y,z)
-    grid_center = np.array([30, 0, 14000], dtype=np.float32)
+    # 2) Define the grid center (x,y,z). The C++ writer uses grid origin = config.origin;
+    # the CLI default config sets origin (0,0,10). Override here if you ran with --out.
+    grid_center = np.array([0, 0, 10], dtype=np.float32)
 
-    # 3) Extract top percentile (Z-up)
+    # 3) Extract top percentile. axis_order="xyz" matches the current C++ writer
+    # (voxel_idx = ix*N*N + iy*N + iz). Use "zyx" for legacy files.
     percentile_to_show = 99.9
     points, intensities = extract_top_percentile_z_up(
         voxel_grid,
@@ -175,7 +211,8 @@ def main():
         grid_center=grid_center,
         percentile=percentile_to_show,
         use_hard_thresh=False,
-        hard_thresh=700
+        hard_thresh=700,
+        axis_order="xyz",
     )
     if points is None:
         return  # nothing to show

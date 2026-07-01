@@ -78,24 +78,21 @@ else()
 endif()
 
 #------------------------------------------------
-# Optional Python bindings (pybind11)
-# Requires: pybind11 (pip install pybind11 OR apt install pybind11-dev)
-# Enable with: cmake -DBUILD_PYTHON_BINDINGS=ON ..
+# Tests: cross-header smoke tests + two-TU ODR regression
 #------------------------------------------------
-option(BUILD_PYTHON_BINDINGS "Build Python pybind11 module (process_image_cpp)" OFF)
-if(BUILD_PYTHON_BINDINGS)
-    find_package(pybind11 CONFIG QUIET)
-    if(pybind11_FOUND)
-        pybind11_add_module(process_image_cpp process_image.cpp)
-        target_include_directories(process_image_cpp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-        if(OpenMP_CXX_FOUND)
-            target_link_libraries(process_image_cpp PRIVATE OpenMP::OpenMP_CXX)
-        endif()
-        message(STATUS "Building process_image_cpp python module")
-    else()
-        message(WARNING "BUILD_PYTHON_BINDINGS=ON but pybind11 not found - skipping python module")
-        message(STATUS "  Install with: pip install pybind11  (or  apt install pybind11-dev)")
-    endif()
+add_executable(smoke_test tests/smoke_test.cpp)
+target_include_directories(smoke_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(smoke_test OpenMP::OpenMP_CXX)
+endif()
+
+# Two-TU ODR regression: link two translation units that both include every
+# header. Before the inline fixes this failed to link (multiply-defined free
+# functions). Keeps the gate closed on a whole class of regressions.
+add_executable(odr_two_tu tests/odr_two_tu_main.cpp tests/odr_two_tu_other.cpp)
+target_include_directories(odr_two_tu PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(odr_two_tu OpenMP::OpenMP_CXX)
 endif()
 
 #------------------------------------------------
@@ -111,8 +108,10 @@ install(FILES ${COMMON_HEADERS}
 # Testing
 enable_testing()
 add_test(NAME EmbeddedMapperSmokeTest
-    COMMAND embedded_voxel_mapper
+    COMMAND embedded_voxel_mapper --duration 1 --grid 32 --out ${CMAKE_BINARY_DIR}/ci_grid.bin
 )
+add_test(NAME SmokeUnitTest  COMMAND smoke_test)
+add_test(NAME OdrTwoTuTest   COMMAND odr_two_tu)
 
 # Custom target for cleaning generated files
 add_custom_target(clean-all
@@ -126,6 +125,5 @@ message(STATUS "Build type:        ${CMAKE_BUILD_TYPE}")
 message(STATUS "C++ compiler:      ${CMAKE_CXX_COMPILER}")
 message(STATUS "C++ flags:         ${CMAKE_CXX_FLAGS}")
 message(STATUS "OpenMP:            ${OpenMP_CXX_FOUND}")
-message(STATUS "Python bindings:   ${BUILD_PYTHON_BINDINGS}")
 message(STATUS "Target arch:       ${CMAKE_SYSTEM_PROCESSOR}")
 message(STATUS "------------------------------------------------")

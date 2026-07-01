@@ -39,15 +39,14 @@ Raspberry Pi), macOS, and WSL.
 ├── clustering.hpp        # 3D DBSCAN clustering & multi-frame tracks
 ├── navigation.hpp        # Costmap, path planning, FCU interface
 ├── live_voxel_mapper.cpp # Main live mapping system + CLI entry point
-├── process_image.cpp     # pybind11 module for offline processing (Python bindings)
 ├── ray_voxel.cpp         # Legacy offline demo (optional third_party deps)
-├── setup.py              # Python bindings build
 ├── CMakeLists.txt        # CMake build
 ├── Makefile              # Make build (Pi-friendly)
-├── spacevoxelviewer.py   # 3D visualization
-├── voxelmotionviewer.py  # Motion visualization
+├── voxelmotionviewer.py  # Motion visualization (reads the VXG1 .bin output)
 ├── tests/
-│   └── smoke_test.cpp    # Cross-module compilation & behavior smoke tests
+│   ├── smoke_test.cpp       # Cross-module compilation & behavior smoke tests
+│   ├── odr_two_tu_main.cpp # Two-TU ODR regression (links 2 TUs w/ all headers)
+│   └── odr_two_tu_other.cpp
 ├── third_party/
 │   └── README.md         # How to vendor optional legacy deps
 └── docs/
@@ -87,14 +86,14 @@ cmake --build build
 ### Test
 
 ```bash
-# 3-second smoke test of the binary
+# Full smoke suite: mapper runs and reports >0 frames processed,
+# then the behavior unit tests, then the two-TU ODR regression test.
 make test
 
-# Compile + run cross-module smoke tests
-cmake -B build . && cmake --build build --target smoke_test    # if a target is configured
-# or directly:
-clang++ -std=c++17 -O2 -I. -o build/smoke_test tests/smoke_test.cpp
-./build/smoke_test
+# Or via CMake
+cmake -B build -DCMAKE_BUILD_TYPE=Release .
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
 ## Building on Raspberry Pi
@@ -113,26 +112,11 @@ make
 The project is pure C++17 with no required runtime libraries, so it
 also runs on Pi Zero / Zero W (single-threaded, with a smaller grid).
 
-## Python Bindings
-
-The Python bindings expose the offline `process_image_cpp` module via
-pybind11.
-
-```bash
-# Desktop (development/visualization)
-pip install -e .
-
-# Embedded target (live camera)
-BUILD_EMBEDDED=1 pip install -e .
-```
-
-Requires `pybind11` (`pip install pybind11` or `apt install pybind11-dev`).
-
 ### Visualization
 
 ```bash
-python spacevoxelviewer.py
-python voxelmotionviewer.py
+python voxelmotionviewer.py        # reads live_voxel_grid.bin by default
+# (Edit the path inside the script if you used --out my_grid.bin.)
 ```
 
 ## Configuration
@@ -232,7 +216,6 @@ dependencies (nlohmann/json, stb) retain their own licenses.
 - OpenMP — parallel processing framework
 - STB Image — image loading utilities (optional, for legacy demo)
 - nlohmann/json — JSON parsing library (optional, for legacy demo)
-- pybind11 — Python-C++ bindings (optional, for Python module)
 
 ---
 

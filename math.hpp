@@ -67,10 +67,19 @@ static inline Vec3 mat3_mul_vec3(const Mat3 &M, const Vec3 &v) {
     return r;
 }
 
+// Transpose a 3x3 row-major matrix (needed for world<-camera rotations)
+static inline Mat3 transpose(const Mat3 &M) {
+    Mat3 t;
+    t.m[0] = M.m[0]; t.m[1] = M.m[3]; t.m[2] = M.m[6];
+    t.m[3] = M.m[1]; t.m[4] = M.m[4]; t.m[5] = M.m[7];
+    t.m[6] = M.m[2]; t.m[7] = M.m[5]; t.m[8] = M.m[8];
+    return t;
+}
+
 //----------------------------------------------
 // Euler -> Rotation Matrix
 //----------------------------------------------
-Mat3 rotation_matrix_yaw_pitch_roll(float yaw_deg, float pitch_deg, float roll_deg) {
+inline Mat3 rotation_matrix_yaw_pitch_roll(float yaw_deg, float pitch_deg, float roll_deg) {
     float y = deg2rad(yaw_deg);
     float p = deg2rad(pitch_deg);
     float r = deg2rad(roll_deg);
@@ -126,7 +135,7 @@ Mat3 rotation_matrix_yaw_pitch_roll(float yaw_deg, float pitch_deg, float roll_d
 //----------------------------------------------
 // Focal Length Calculation
 //----------------------------------------------
-float compute_focal_length(int image_width, float fov_degrees) {
+inline float compute_focal_length(int image_width, float fov_degrees) {
     float fov_rad = deg2rad(fov_degrees);
     return (image_width * 0.5f) / std::tan(fov_rad * 0.5f);
 }

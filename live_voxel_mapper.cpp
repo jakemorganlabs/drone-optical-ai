@@ -136,21 +136,23 @@ public:
         }
         
         const GridConfig& config = voxel_grid->get_config();
-        int N = config.N;
+        int32_t N = config.N;
         float voxel_size = config.voxel_size;
-        
-        // Write metadata
-        ofs.write(reinterpret_cast<const char*>(&N), sizeof(int));
+
+        // VXG1 container header: magic | int32 N | float32 voxel_size | int32 grid_count
+        const char magic[4] = {'V','X','G','1'};
+        ofs.write(magic, 4);
+        ofs.write(reinterpret_cast<const char*>(&N), sizeof(int32_t));
         ofs.write(reinterpret_cast<const char*>(&voxel_size), sizeof(float));
-        
-        // Write dynamic voxel data
-        for(int i = 0; i < voxel_grid->get_total_voxels(); i++) {
+        const int32_t num_grids = 2;
+        ofs.write(reinterpret_cast<const char*>(&num_grids), sizeof(int32_t));
+
+        const int total = voxel_grid->get_total_voxels();
+        for(int i = 0; i < total; i++) {
             float val = voxel_grid->get_dynamic_voxel(i);
             ofs.write(reinterpret_cast<const char*>(&val), sizeof(float));
         }
-        
-        // Write static voxel data
-        for(int i = 0; i < voxel_grid->get_total_voxels(); i++) {
+        for(int i = 0; i < total; i++) {
             float val = voxel_grid->get_static_voxel(i);
             ofs.write(reinterpret_cast<const char*>(&val), sizeof(float));
         }
@@ -163,10 +165,22 @@ public:
 private:
     // Main processing loop
     void processing_loop() {
+        using clock = std::chrono::steady_clock;
+        auto last = clock::now();
         while(running.load()) {
+            auto now = clock::now();
+            float dt = std::chrono::duration<float>(now - last).count();
+            last = now;
+
+            // Dev mode: if the provider is a MockPoseProvider, drive it so it
+            // synthesizes frames + pose. Real providers (DronePoseProvider)
+            // self-drive via their own capture thread and ignore this tick.
+            if(auto* mock = dynamic_cast<MockPoseProvider*>(pose_provider.get()))
+                mock->simulate_movement(dt);
+
             // Apply decay to voxel grids
             voxel_grid->apply_decay();
-            
+
             // Sleep for a short time
             std::this_thread::sleep_for(std::chrono::milliseconds(33)); // ~30 FPS
         }
@@ -395,8 +409,11 @@ int main(int argc, char** argv) {
     // Create live voxel mapper
     LiveVoxelMapper mapper(config);
 
-    // Configure parameters
-    mapper.set_motion_threshold(3.0f);
+    // Configure parameters. The mock provider emits normalized pixels in
+// [0,1], so the motion threshold must be < 1.0 to detect frame-to-frame
+// changes; 0.3 is a sensible default for both the mock and real grayscale
+// frames scaled to [0,1].
+    mapper.set_motion_threshold(0.3f);
     mapper.set_use_adaptive_threshold(true);
     mapper.set_use_noise_filtering(true);
     mapper.set_min_region_size(4);

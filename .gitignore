@@ -8,6 +8,15 @@
 *.dll
 *.a
 
+# Compiled executables that accidentally land in the source tree
+# (protect against agents committing build output next to sources).
+/coordinator
+/pilot_main
+/tether-test
+/*.out
+ground/coordinator/coordinator
+control/pilot_main
+
 # Output files from running the mapper
 *.bin
 *.log

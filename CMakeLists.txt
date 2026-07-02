@@ -245,25 +245,6 @@ if(OpenMP_CXX_FOUND)
 endif()
 
 #------------------------------------------------
-# Phase 3 tests (manual Part 4): CfC observation builder + safety filter.
-# Both are header-only-C++ unit tests (no ORT required — cfc_pilot.hpp uses
-# `#if __has_include(<onnxruntime_cxx_api.h>)` so it compiles with or without
-# onnxruntime installed, and safety_filter is a public static helper callable
-# without an ONNX session).
-#------------------------------------------------
-add_executable(observation_test tests/observation_test.cpp)
-target_link_libraries(observation_test PRIVATE voxelcore)
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(observation_test PRIVATE OpenMP::OpenMP_CXX)
-endif()
-
-add_executable(cfc_safety_test tests/cfc_safety_test.cpp)
-target_link_libraries(cfc_safety_test PRIVATE voxelcore)
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(cfc_safety_test PRIVATE OpenMP::OpenMP_CXX)
-endif()
-
-#------------------------------------------------
 # Phase 5: per-drone ground coordinator (manual Part 6.1).
 # POSIX-sockets + JSON-line TCP client to the Phase 4 tether-agent on the
 # drone side, plus a read-only /fleet HTTP scrape on 127.0.0.1:8090. Pure
@@ -299,8 +280,6 @@ add_test(NAME FailsafeTest   COMMAND failsafe_test)
 add_test(NAME PerceptionCompileTest COMMAND perception_compile_test)
 add_test(NAME ObservationTest COMMAND observation_test)
 add_test(NAME CfcSafetyTest   COMMAND cfc_safety_test)
-add_test(NAME ObservationTest COMMAND observation_test)
-add_test(NAME CfcSafetyTest  COMMAND cfc_safety_test)
 
 # Custom target for cleaning generated files
 add_custom_target(clean-all

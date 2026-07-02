@@ -252,8 +252,15 @@ endif()
 # NOT part of the default `all`/`test` flow (mirrors the tether-agent
 # scaffold). `make coordinator` / `cmake --build . --target coordinator`
 # builds it on demand.
-#------------------------------------------------
-add_executable(coordinator ground/coordinator/coordinator.cpp)
+#
+# coordinator.cpp defines the library only; its `main()` lives inside
+# `#ifdef COORDINATOR_TEST_MAIN` (a small harness that connects to a
+# running tether-agent). Define it here so the executable links, and use
+# EXCLUDE_FROM_ALL so a default `cmake --build build` won't pull it in
+# (it requires a live tether-agent at 10.8.0.2:52000 to be meaningful).
+#-----------------------------------------------
+add_executable(coordinator EXCLUDE_FROM_ALL ground/coordinator/coordinator.cpp)
+target_compile_definitions(coordinator PRIVATE COORDINATOR_TEST_MAIN)
 target_link_libraries(coordinator PRIVATE voxelcore)
 if(OpenMP_CXX_FOUND)
     target_link_libraries(coordinator PRIVATE OpenMP::OpenMP_CXX)

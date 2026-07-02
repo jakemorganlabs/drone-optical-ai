@@ -10,10 +10,19 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Compiler flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
-set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+# Compiler flags. Use generator expressions so gcc/clang get -Wall -Wextra
+# while MSVC gets /W4 (and the gcc-only -O flags stay off MSVC's command line,
+# which would otherwise be mis-parsed by cl.exe, e.g. D8021 invalid numeric
+# argument '/Wextra').
+add_compile_options(
+    $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-Wall>
+    $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-Wextra>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+)
+set(CMAKE_CXX_FLAGS_DEBUG
+    "$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-g;-O0>")
+set(CMAKE_CXX_FLAGS_RELEASE
+    "$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-O3;-DNDEBUG>")
 
 # Output to ./build/bin for convenience
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

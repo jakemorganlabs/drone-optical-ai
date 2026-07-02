@@ -50,8 +50,16 @@ Raspberry Pi), macOS, and WSL.
 │   └── odr_two_tu_other.cpp
 ├── third_party/
 │   └── README.md         # How to vendor optional legacy deps
-└── docs/
-    └── RASPBERRY_PI.md   # Raspberry Pi build & deployment guide
+├── docs/                 # Option A build manual pages
+│   ├── RASPBERRY_PI.md     # Raspberry Pi build & deployment guide
+│   ├── WIRING.md           # Flight controller <-> companion computer wiring
+│   ├── HARDWARE.md         # Bill of materials (per-drone vs shared ground)
+│   ├── TETHER.md           # Fiber-optic tether datalink
+│   ├── FLEET.md            # One Starlink terminal, many drones
+│   ├── SAFETY.md           # Test ladder + pre-flight card template
+│   ├── REGULATORY.md       # US Part 107 / Remote ID / BVLOS / LAANC
+│   └── ARCHITECTURE.md     # One-page stack diagram (onboard + ground)
+└── tests/                 # Smoke + ODR + failsafe + perception + (planned) cfc
 ```
 
 The `core/` directory is a header-only interface library (`voxelcore` in
@@ -101,6 +109,41 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release .
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+## Option A build manual pages
+
+This repo is the partial implementation of **Option A** — an onboard
+CfC-piloted drone with a fiber tether, a shared ground box, and a
+remote LLM mission brain. The end-to-end design lives across these docs:
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — one-page stack diagram
+  (onboard + ground).
+- [docs/HARDWARE.md](docs/HARDWARE.md) — the bill of materials
+  (per-drone expendable vs shared ground).
+- [docs/WIRING.md](docs/WIRING.md) — flight controller <-> companion
+  computer wiring + MAVLink buzzword checklist.
+- [docs/TETHER.md](docs/TETHER.md) — fiber-optic tether datalink +
+  link-loss contract.
+- [docs/FLEET.md](docs/FLEET.md) — one Starlink terminal, many drones.
+- [docs/SAFETY.md](docs/SAFETY.md) — the test ladder + a pre-flight
+  card template (print and sign before props spin).
+- [docs/REGULATORY.md](docs/REGULATORY.md) — US Part 107 / Remote ID /
+  tethered-UAS / BVLOS / LAANC / RF (verify for your region).
+
+The CMake option gates are on by default OFF (manual Part 9.2):
+
+```bash
+# Bare configure, no external deps — must succeed:
+cmake -B build .
+
+# Wrapped builds (optional; require MAVSDK / onnxruntime):
+cmake -B build -DDRONECTL_ENABLE_FC_BRIDGE=ON .
+cmake -B build -DDRONECTL_ENABLE_CFC=ON .
+```
+
+The Make build is the gate; the CMake script is the reference / long-term build.
+Single-TU `make` produces the embedded mapper by default; `make test` runs
+the full unit ladder (see [tests/README.md](tests/README.md)).
 
 ## Building on Raspberry Pi
 
@@ -211,6 +254,49 @@ Code style:
 - Python: PEP 8
 - Headers: `#pragma once`
 - Documentation: Doxygen-style comments
+
+## Packaging
+
+The end-to-end, flashable turn-key artifact lives under [`image/`](image/):
+
+- **`image/systemd/`** — the `dronectl-pilot`, `mavlink-router`,
+  `tether-agent`, and first-boot `dronectl-wizard` systemd units (manual
+  Part 8.1).
+- **`image/config/config.yaml`** — the default `/etc/dronectl/config.yaml`
+  schema (manual Part 8.2); the first-boot wizard rewrites it on first run.
+- **`image/wizard/wizard.py`** — a stdlib-only first-boot AP web wizard
+  (manual Part 8.4) that collects `drone_id`, camera type, FC URL, tether
+  IPs, and an optional server endpoint, then writes the config, disables
+  itself, and reboots.
+- **`image/dronectl`** — the stdlib-only `dronectl status` /
+  `dronectl preflight` CLI (manual Part 8.5); installed at
+  `/usr/local/bin/dronectl` by the image stage. Both subcommands degrade to
+  `MISSING` for any absent subsystem, so they are safe to run on a dev box
+  with none of the onboard artifacts present.
+- **`image/pi-gen/`** — a custom [pi-gen](https://github.com/RPi-Distro/pi-gen)
+  stage (`stage-dronectl/`) that apt-installs `libcamera`, `onnxruntime`,
+  `libmavsdk-dev`, and `mavlink-router`, drops the prebuilt `pilot_main` +
+  `embedded_voxel_mapper` + `cfc_policy.onnx` into `/opt/dronectl/`, enables
+  the `dronectl-*` units, and ships the default config. See
+  [`image/pi-gen/README.md`](image/pi-gen/README.md) and the
+  [`build.sh`](image/pi-gen/build.sh) skeleton.
+
+### Building the image
+
+```bash
+# 1. Cross-compile (or build on a Pi) so that build/pilot_main,
+#    build/embedded_voxel_mapper, build/tether_agent, and cfc_policy.onnx exist.
+# 2. Stage + bake:
+image/pi-gen/build.sh --repo-root . --artifacts build --release
+# 3. (the --release flag xz -9s deploy/*.img for you)
+```
+
+### GitHub Release flow
+
+Attach `deploy/dronectl-pi.img.xz` to a GitHub Release tagged e.g. `v0.X`;
+users flash it with Raspberry Pi Imager, boot, join the `dronectl-<host>` AP,
+run the wizard at `http://10.0.0.1/`, and fly. The same image works with
+`sim/quickstart.sh` for zero-hardware SITL bring-up (manual Part 8.6).
 
 ## License
 

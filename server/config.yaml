@@ -1,0 +1,30 @@
+# Phase 5 (manual Part 6.3) — mission-brain validator configuration.
+#
+# Loaded by server/validator.py. Edits here take effect on the next
+# /mission request (the validator re-reads the config file per request
+# so an operator can tighten the geofence without restarting the server).
+#
+# Coordinates are meters in the local-NED / ENU frame the FC publishes
+# (north=x, east=y, up=z). The geofence polygon is a list of [x, y]
+# vertices in order; the polygon is treated as closed (last vertex
+# implicit-joined to the first). A goal's (x,y) must be strictly inside.
+#
+# Altitude band is expressed as AGL meters above the takeoff origin
+# (z, where z=0 is home). Separation is the minimum Euclidean distance
+# allowed between any two drones' *current targets* (so re-tasking one
+# drone cannot place it on top of another).
+
+geofence:
+  # Example: a 400m x 300m rectangle north of the launch point.
+  polygon:
+    - [0.0, 0.0]
+    - [400.0, 0.0]
+    - [400.0, 300.0]
+    - [0.0, 300.0]
+
+altitude_band:
+  floor_m: 0.0     # never below takeoff (no diving)
+  ceil_m:  120.0   # FAA Part 107 ceiling (400 ft AGL)
+
+separation:
+  min_distance_m: 5.0

@@ -21,6 +21,18 @@ endif
 MAVSDK_PROBE := $(shell printf '%s\n' '\#include <mavsdk/mavsdk.h>' > /tmp/_mavsdk_probe.cpp && printf '%s\n' 'int main(){mavsdk::Mavsdk m; (void)m; return 0;}' >> /tmp/_mavsdk_probe.cpp && $(CXX) -std=c++17 -x c++ /tmp/_mavsdk_probe.cpp -lmavsdk -o /dev/null 2>/dev/null && echo '-lmavsdk' || echo '')
 ifneq ($(MAVSDK_PROBE),)
     MAVSDK_FLAGS := $(MAVSDK_PROBE)
+    HAVE_MAVSDK := 1
+endif
+
+# Optional onnxruntime (ORT) CfC inference: probe whether we can compile+link a
+# tiny TU pulling in <onnxruntime_cxx_api.h> against -lonnxruntime. Same shape
+# as the MAVSDK / OPENMP probes. When found, set DRONECTL_HAVE_ORT so the CfC
+# pilot compiles in the real ONNX inference path; otherwise the no-op CfC
+# (returns HOLD) keeps `make pilot_main` working on dev machines.
+ORT_PROBE := $(shell printf '%s\n' '\#include <onnxruntime_cxx_api.h>' > /tmp/_ort_probe.cpp && printf '%s\n' 'int main(){ Ort::Env e(ORT_LOGGING_LEVEL_WARNING,"x"); (void)e; return 0; }' >> /tmp/_ort_probe.cpp && $(CXX) -std=c++17 -x c++ /tmp/_ort_probe.cpp -lonnxruntime -o /dev/null 2>/dev/null && echo '-lonnxruntime' || echo '')
+ifneq ($(ORT_PROBE),)
+    ORT_FLAGS := $(ORT_PROBE)
+    HAVE_ORT := 1
 endif
 
 # Directories
@@ -76,26 +88,37 @@ $(LEGACY_TARGET): $(LEGACY_SRC) $(COMMON_HEADERS) | $(BUILD_DIR)
 	@$(CXX) $(CXXFLAGS) $(RELEASE_FLAGS) -Ithird_party -o $@ $(LEGACY_SRC) 2>/dev/null || \
 		echo "  skipped: third_party deps missing. See third_party/README.md"
 
-# Pilot main: Phase 1 stub entry point. Always builds the stub main
-# (control/pilot_main.cpp) + the perception TU so the new translation unit has
-# a standalone link entry point and the two-TU ODR gate is implicitly exercised.
-# When MAVSDK is available, the FC bridge TU (control/fc_bridge/fc_bridge.cpp)
-# is linked in too; without MAVSDK the stub still compiles and runs.
+# Pilot main: Phase 3 onboard loop. Composes DronePoseProvider + FcBridge
+# (optional MAVSDK) + CfCPilot (optional onnxruntime) + Failsafe + DualVoxelGrid
+# and runs a 20 Hz control loop. Header-only CfC pieces (observation.hpp +
+# cfc_pilot.hpp) are pulled in via -Icontrol/cfc_pilot. Without MAVSDK the
+# FcBridge TU is omitted; without ORT the CfC no-op (HOLD) is used. Either
+# way `make pilot_main` produces a working binary.
 PILOT_TARGET    = $(BUILD_DIR)/pilot_main
 PILOT_STUB_SRC  = control/pilot_main.cpp
+PILOT_HDRS      = control/cfc_pilot/observation.hpp control/cfc_pilot/cfc_pilot.hpp
 FC_BRIDGE_SRC   = control/fc_bridge/fc_bridge.cpp
 
+# Per-target defines for the optional autonomy backends.
+PILOT_DEFS :=
+ifdef HAVE_MAVSDK
+    PILOT_DEFS += -DDRONECTL_HAVE_MAVSDK
+endif
+ifdef HAVE_ORT
+    PILOT_DEFS += -DDRONECTL_HAVE_ORT
+endif
+
 pilot_main: $(BUILD_DIR) $(PILOT_TARGET)
-$(PILOT_TARGET): $(PILOT_STUB_SRC) $(PERCEPTION_SRC) $(COMMON_HEADERS) $(PERCEPTION_HDRS) control/fc_bridge/fc_bridge.hpp | $(BUILD_DIR)
+$(PILOT_TARGET): $(PILOT_STUB_SRC) $(PERCEPTION_SRC) $(COMMON_HEADERS) $(PERCEPTION_HDRS) $(PILOT_HDRS) control/fc_bridge/fc_bridge.hpp control/failsafe.hpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(RELEASE_FLAGS) -I. -c $(PERCEPTION_SRC) -o $(BUILD_DIR)/drone_pose_provider.o
-	$(CXX) $(CXXFLAGS) $(RELEASE_FLAGS) -I. -c $(PILOT_STUB_SRC) -o $(BUILD_DIR)/pilot_main.o
+	$(CXX) $(CXXFLAGS) $(RELEASE_FLAGS) -I. $(PILOT_DEFS) -c $(PILOT_STUB_SRC) -o $(BUILD_DIR)/pilot_main.o
 ifeq ($(MAVSDK_FLAGS),)
 	@echo "Building pilot_main (no MAVSDK; FC bridge TU omitted)"
-	$(CXX) $(OPENMP_FLAGS) -o $@ $(BUILD_DIR)/pilot_main.o $(BUILD_DIR)/drone_pose_provider.o
+	$(CXX) $(OPENMP_FLAGS) -o $@ $(BUILD_DIR)/pilot_main.o $(BUILD_DIR)/drone_pose_provider.o $(ORT_FLAGS)
 else
 	@echo "Building pilot_main (MAVSDK available; linking FC bridge)"
 	$(CXX) $(CXXFLAGS) $(RELEASE_FLAGS) -I. -Icontrol/fc_bridge -c $(FC_BRIDGE_SRC) -o $(BUILD_DIR)/fc_bridge.o
-	$(CXX) $(OPENMP_FLAGS) -o $@ $(BUILD_DIR)/pilot_main.o $(BUILD_DIR)/drone_pose_provider.o $(BUILD_DIR)/fc_bridge.o $(MAVSDK_FLAGS)
+	$(CXX) $(OPENMP_FLAGS) -o $@ $(BUILD_DIR)/pilot_main.o $(BUILD_DIR)/drone_pose_provider.o $(BUILD_DIR)/fc_bridge.o $(MAVSDK_FLAGS) $(ORT_FLAGS)
 endif
 
 # Debug builds
@@ -121,7 +144,7 @@ distclean: clean
 	rm -f *.bin *.log *.out
 
 # Quick smoke test - launch mapper for 2 seconds and check it produced frames
-test: $(EMBEDDED_TARGET) $(BUILD_DIR)/smoke_test $(BUILD_DIR)/odr_two_tu $(BUILD_DIR)/perception_compile_test $(BUILD_DIR)/failsafe_test
+test: $(EMBEDDED_TARGET) $(BUILD_DIR)/smoke_test $(BUILD_DIR)/odr_two_tu $(BUILD_DIR)/perception_compile_test $(BUILD_DIR)/failsafe_test $(BUILD_DIR)/observation_test $(BUILD_DIR)/cfc_safety_test
 	@echo "Running smoke test (mapper 2s)..."
 	@./$(EMBEDDED_TARGET) --duration 2 --grid 48 --out $(BUILD_DIR)/make_ci_grid.bin > $(BUILD_DIR)/mapper.log 2>&1
 	@grep -q "Total frames: [1-9]" $(BUILD_DIR)/mapper.log || { echo "FAIL: no frames processed"; cat $(BUILD_DIR)/mapper.log; exit 1; }
@@ -133,6 +156,10 @@ test: $(EMBEDDED_TARGET) $(BUILD_DIR)/smoke_test $(BUILD_DIR)/odr_two_tu $(BUILD
 	@./$(BUILD_DIR)/perception_compile_test
 	@echo "Running failsafe state-machine tests..."
 	@./$(BUILD_DIR)/failsafe_test
+	@echo "Running CfC observation builder tests..."
+	@./$(BUILD_DIR)/observation_test
+	@echo "Running CfC safety-filter tests..."
+	@./$(BUILD_DIR)/cfc_safety_test
 	@echo "All smoke tests passed."
 
 # Unit smoke test binary (cross-header behavior checks)
@@ -143,6 +170,19 @@ $(BUILD_DIR)/smoke_test: tests/smoke_test.cpp $(COMMON_HEADERS) | $(BUILD_DIR)
 # single self-contained compilation unit just like smoke_test.
 $(BUILD_DIR)/failsafe_test: tests/failsafe_test.cpp control/failsafe.hpp $(COMMON_HEADERS) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(RELEASE_FLAGS) -I. -o $@ tests/failsafe_test.cpp
+
+# Phase 3 CfC observation builder unit tests (Part 4.1). Header-only
+# observation.hpp included in core/, so the test TU is a single self-contained
+# compilation unit. Compiles with or without onnxruntime.
+$(BUILD_DIR)/observation_test: tests/observation_test.cpp control/cfc_pilot/observation.hpp $(COMMON_HEADERS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(RELEASE_FLAGS) -I. -o $@ tests/observation_test.cpp
+
+# Phase 3 CfC safety-filter unit tests (Part 4.4). Exercises
+# CfCPilot::safety_filter (a public static helper) against a tiny DualVoxelGrid.
+# Does not require onnxruntime — the __has_include gate in cfc_pilot.hpp keeps
+# it single-TU-compilable on machines without ORT.
+$(BUILD_DIR)/cfc_safety_test: tests/cfc_safety_test.cpp control/cfc_pilot/cfc_pilot.hpp control/cfc_pilot/observation.hpp $(COMMON_HEADERS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(RELEASE_FLAGS) -I. -o $@ tests/cfc_safety_test.cpp
 
 # Two-TU ODR regression: two TUs including all headers must link cleanly
 $(BUILD_DIR)/odr_two_tu: tests/odr_two_tu_main.cpp tests/odr_two_tu_other.cpp $(COMMON_HEADERS) | $(BUILD_DIR)
@@ -174,11 +214,12 @@ help:
 	@echo "Targets:"
 	@echo "  all          - Build embedded mapper (default, single-TU)"
 	@echo "  full         - Build mapper + perception TU (two-TU ODR gate)"
-	@echo "  pilot_main   - Build pilot stub + perception TU (+ FC bridge if MAVSDK)"
+	@echo "  pilot_main   - Build Phase 3 onboard pilot loop (+ MAVSDK FcBridge / +ORT CfC if found)"
 	@echo "  legacy       - Build legacy ray_voxel demo (optional third_party deps)"
 	@echo "  debug        - Build with debug symbols"
 	@echo "  test         - Run smoke + ODR + perception + failsafe tests"
 	@echo "  tether-test  - Build the Phase 4 tether-agent scaffold (optional)"
+	@echo "  coordinator  - Build the Phase 5 ground coordinator scaffold (optional)"
 	@echo "  install      - Install to $(INSTALL_DIR)"
 	@echo "  uninstall    - Remove from $(INSTALL_DIR)"
 	@echo "  clean        - Clean build artifacts"
@@ -206,4 +247,17 @@ tether-test: $(TETHER_TGT)
 $(TETHER_TGT): $(TETHER_SRC) $(TETHER_HDR) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -I. -DTETHER_AGENT_TEST_MAIN -o $@ $(TETHER_SRC)
 
-.PHONY: all full pilot_main debug legacy install uninstall clean distclean test docs help tether-test
+# Optional per-drone ground coordinator (Phase 5 link/ground plumbing;
+# manual Part 6.1). NOT in the main build/test targets — same shape as
+# tether-test: build only on demand. One coordinator process per drone; a
+# multi-drone ground box runs N of these. The self-test binary dials one
+# tether-agent over the fiber IP and serves a read-only /fleet scrape.
+COORD_SRC    = ground/coordinator/coordinator.cpp
+COORD_HDR    = ground/coordinator/coordinator.hpp
+COORD_TGT    = $(BUILD_DIR)/coordinator
+
+coordinator: $(COORD_TGT)
+$(COORD_TGT): $(COORD_SRC) $(COORD_HDR) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -I. -DCOORDINATOR_TEST_MAIN -o $@ $(COORD_SRC)
+
+.PHONY: all full pilot_main debug legacy install uninstall clean distclean test docs help tether-test coordinator

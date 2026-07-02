@@ -1,0 +1,16 @@
+# Managed by dronectl
+# mavlink-router multiplexes the FC MAVLink link to onboard + ground consumers
+# (manual Part 3.2). Config lives at /etc/mavlink-router/main.conf (shipped empty
+# by the pi-gen stage until the wizard or operator fills it). Enabled at bake.
+[Unit]
+Description=mavlink-router (FC MAVLink multiplexer)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/mavlink-router -c /etc/mavlink-router/main.conf
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

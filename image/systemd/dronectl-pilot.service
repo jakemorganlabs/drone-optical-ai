@@ -1,0 +1,17 @@
+# Managed by dronectl
+# Onboard pilot: LiveVoxelMapper + CfC + FcBridge (manual Part 4.5/8.1).
+# Unit is enabled during image bake by the pi-gen stage (see image/pi-gen/).
+# Until the pilot_main binary is present at /opt/dronectl/bin/pilot_main
+# (a later-phase image flash), this unit will restart-loop harmlessly.
+[Unit]
+Description=DroneCtl onboard pilot (mapper + CfC + FC bridge)
+After=network-online.target mavlink-router.service
+Wants=mavlink-router.service
+
+[Service]
+ExecStart=/opt/dronectl/bin/pilot_main --config /etc/dronectl/config.yaml
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

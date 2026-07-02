@@ -1,0 +1,10 @@
+# /etc/dronectl/config.yaml — DroneCtl onboard configuration (manual Part 8.2).
+# Shipped by the pi-gen stage as the default; the first-boot wizard
+# (image/wizard/wizard.py) rewrites this from a web form on first boot.
+drone_id: drone-01
+camera: { type: depth_oakd, width: 640, height: 480, fov_deg: 71 }
+grid:   { n: 96, voxel_size_m: 0.4, horizon_m: 30 }
+fc:     { url: "udp://:14540", max_velocity_ms: 5.0, max_accel_ms2: 2.0 }
+cfc:    { model: /opt/dronectl/cfc_policy.onnx, hidden_units: 48, rate_hz: 20 }
+tether: { iface: eth0, ground_ip: 10.8.0.1, self_ip: 10.8.0.2 }
+failsafe: { link_loss_action: return_along_track, low_batt_pct: 20 }

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(LiveVoxelMapper VERSION 1.0.0 LANGUAGES CXX)
+project(dronectl LANGUAGES CXX)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -18,13 +18,61 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 # Output to ./build/bin for convenience
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
+#------------------------------------------------
+# Option gates (manual Part 9.2)
+#
+# The reference manual lists `find_package(MAVSDK REQUIRED)` and
+# `find_package(onnxruntime REQUIRED)` as unconditional. To keep a bare
+# `cmake -B build .` configuring and building with zero external deps on a
+# fresh checkout, the MAVSDK and onnxruntime lookups are gated behind the
+# CMake options below. They default OFF; a wrapped build only turns them on
+# when the corresponding optional targets are wanted:
+#
+#   cmake -B build -DDRONECTL_ENABLE_FC_BRIDGE=ON .
+#   cmake -B build -DDRONECTL_ENABLE_CFC=ON .
+#
+# With both OFF (the default), this script configures and builds: voxelcore
+# (header-only lib), embedded_voxel_mapper, smoke_test, odr_two_tu,
+# failsafe_test, perception_compile_test, observation_test, cfc_safety_test,
+# the pilot_main stub, and the optional ray_voxel_legacy target.
+#------------------------------------------------
+option(DRONECTL_ENABLE_FC_BRIDGE "Link the MAVSDK flight-controller bridge TU into pilot_main (requires libmavsdk)" OFF)
+option(DRONECTL_ENABLE_CFC       "Link the CfC ONNX pilot into pilot_main (requires onnxruntime)" OFF)
+
+#------------------------------------------------
 # Find OpenMP (optional - works fine single-threaded on Pi Zero as well)
+#------------------------------------------------
 find_package(OpenMP QUIET)
 if(OpenMP_CXX_FOUND)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
     message(STATUS "OpenMP found and enabled")
 else()
     message(WARNING "OpenMP not found - parallelization will be disabled (single-threaded fallback)")
+endif()
+
+# Optional external packages; guarded by the explicit options above.
+if(DRONECTL_ENABLE_FC_BRIDGE)
+    find_package(MAVSDK REQUIRED)
+    message(STATUS "DRONECTL_ENABLE_FC_BRIDGE=ON -> MAVSDK linked into pilot_main")
+endif()
+if(DRONECTL_ENABLE_CFC)
+    # Prefer find_package; fall back to an ORT_ROOT hint (manual Part 9.2).
+    find_package(onnxruntime QUIET)
+    if(onnxruntime_FOUND)
+        message(STATUS "DRONECTL_ENABLE_CFC=ON -> onnxruntime linked into pilot_main (find_package)")
+    elseif(DEFINED ENV{ORT_ROOT})
+        set(ORT_INCLUDE_DIR "$ENV{ORT_ROOT}/include")
+        set(ORT_LIB_DIR "$ENV{ORT_ROOT}/lib")
+        if(EXISTS "${ORT_INCLUDE_DIR}/onnxruntime_cxx_api.h" AND
+           EXISTS "${ORT_LIB_DIR}/libonnxruntime.so")
+            set(ORT_ROOT_FOUND TRUE)
+            message(STATUS "DRONECTL_ENABLE_CFC=ON -> onnxruntime linked via ORT_ROOT=$ENV{ORT_ROOT}")
+        else()
+            message(FATAL_ERROR "DRONECTL_ENABLE_CFC=ON but onnxruntime not found via find_package or ORT_ROOT")
+        endif()
+    else()
+        message(FATAL_ERROR "DRONECTL_ENABLE_CFC=ON but onnxruntime not found (install it or set ORT_ROOT)")
+    endif()
 endif()
 
 #------------------------------------------------
@@ -62,40 +110,50 @@ if(OpenMP_CXX_FOUND)
 endif()
 
 #------------------------------------------------
-# onboard pilot_main: Phase-1 stub main + perception TU, plus the optional
-# MAVSDK FcBridge TU when libmavsdk is available.
-#
-# The stub always builds (gives the perception TU a link entry point and keeps
-# the two-TU ODR gate honest). The FcBridge TU is only added when MAVSDK is
-# found; otherwise it is silently omitted with a status message, mirroring the
-# ray_voxel_legacy / nlohmann-json guard. A fresh `make` without MAVSDK still
-# produces a working stub pilot_main binary.
+# onboard pilot_main: Phase-3 onboard loop. Composes DronePoseProvider +
+# FcBridge (optional MAVSDK) + CfCPilot (optional onnxruntime) + Failsafe +
+# DualVoxelGrid. Header-only CfC pieces (control/cfc_pilot/observation.hpp +
+# cfc_pilot.hpp) are pulled in via the include path. With both feature
+# options OFF (default) the pilot main still builds and produces a working
+# binary where the CfC is a no-op HOLD and the FcBridge TU is omitted.
 #------------------------------------------------
-find_package(MAVSDK QUIET)
 set(PILOT_SOURCES
     control/pilot_main.cpp
     perception/drone_pose_provider.cpp
 )
-if(MAVSDK_FOUND)
+if(DRONECTL_ENABLE_FC_BRIDGE)
     list(APPEND PILOT_SOURCES control/fc_bridge/fc_bridge.cpp)
 endif()
 
-add_executable(pilot_main ${PILOT_SOURCES})
+add_executable(pilot_main ${PILOT_SOURCES}
+    control/cfc_pilot/observation.hpp
+    control/cfc_pilot/cfc_pilot.hpp
+)
 target_link_libraries(pilot_main PRIVATE voxelcore)
 target_include_directories(pilot_main PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/control/fc_bridge
+    ${CMAKE_CURRENT_SOURCE_DIR}/control/cfc_pilot
 )
-if(MAVSDK_FOUND)
+if(DRONECTL_ENABLE_FC_BRIDGE)
+    target_compile_definitions(pilot_main PRIVATE DRONECTL_HAVE_MAVSDK)
     target_link_libraries(pilot_main PRIVATE MAVSDK::mavsdk)
-    if(OpenMP_CXX_FOUND)
-        target_link_libraries(pilot_main PRIVATE OpenMP::OpenMP_CXX)
-    endif()
     message(STATUS "Building pilot_main with FcBridge (MAVSDK found)")
 else()
-    if(OpenMP_CXX_FOUND)
-        target_link_libraries(pilot_main PRIVATE OpenMP::OpenMP_CXX)
+    message(STATUS "Building pilot_main without FcBridge (DRONECTL_ENABLE_FC_BRIDGE=OFF)")
+endif()
+if(DRONECTL_ENABLE_CFC)
+    target_compile_definitions(pilot_main PRIVATE DRONECTL_HAVE_ORT)
+    if(onnxruntime_FOUND)
+        target_link_libraries(pilot_main PRIVATE onnxruntime::onnxruntime)
+    elseif(ORT_ROOT_FOUND)
+        target_include_directories(pilot_main PRIVATE ${ORT_INCLUDE_DIR})
+        target_link_directories(pilot_main PRIVATE ${ORT_LIB_DIR})
+        target_link_libraries(pilot_main PRIVATE onnxruntime)
     endif()
-    message(STATUS "Building pilot_main stub (MAVSDK not found; FcBridge omitted)")
+    message(STATUS "Linking CfC pilot (onnxruntime found)")
+endif()
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(pilot_main PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
 #------------------------------------------------
@@ -162,6 +220,55 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(perception_compile_test PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
+# Phase 3 (CfC observation builder + safety filter unit tests). Both are
+# header-only-depending tests; the safety-filter test deliberately does
+# NOT need onnxruntime (the geometric veto is decoupled from inference).
+add_executable(observation_test tests/observation_test.cpp)
+target_link_libraries(observation_test PRIVATE voxelcore)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(observation_test PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
+add_executable(cfc_safety_test tests/cfc_safety_test.cpp)
+target_link_libraries(cfc_safety_test PRIVATE voxelcore)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(cfc_safety_test PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
+#------------------------------------------------
+# Phase 3 tests (manual Part 4): CfC observation builder + safety filter.
+# Both are header-only-C++ unit tests (no ORT required — cfc_pilot.hpp uses
+# `#if __has_include(<onnxruntime_cxx_api.h>)` so it compiles with or without
+# onnxruntime installed, and safety_filter is a public static helper callable
+# without an ONNX session).
+#------------------------------------------------
+add_executable(observation_test tests/observation_test.cpp)
+target_link_libraries(observation_test PRIVATE voxelcore)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(observation_test PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
+add_executable(cfc_safety_test tests/cfc_safety_test.cpp)
+target_link_libraries(cfc_safety_test PRIVATE voxelcore)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(cfc_safety_test PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
+#------------------------------------------------
+# Phase 5: per-drone ground coordinator (manual Part 6.1).
+# POSIX-sockets + JSON-line TCP client to the Phase 4 tether-agent on the
+# drone side, plus a read-only /fleet HTTP scrape on 127.0.0.1:8090. Pure
+# C++17, no HTTP framework dep. Built as an OPTIONAL self-test binary —
+# NOT part of the default `all`/`test` flow (mirrors the tether-agent
+# scaffold). `make coordinator` / `cmake --build . --target coordinator`
+# builds it on demand.
+#------------------------------------------------
+add_executable(coordinator ground/coordinator/coordinator.cpp)
+target_link_libraries(coordinator PRIVATE voxelcore)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(coordinator PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
 #------------------------------------------------
 # Install targets
 #------------------------------------------------
@@ -181,6 +288,10 @@ add_test(NAME SmokeUnitTest  COMMAND smoke_test)
 add_test(NAME OdrTwoTuTest   COMMAND odr_two_tu)
 add_test(NAME FailsafeTest   COMMAND failsafe_test)
 add_test(NAME PerceptionCompileTest COMMAND perception_compile_test)
+add_test(NAME ObservationTest COMMAND observation_test)
+add_test(NAME CfcSafetyTest   COMMAND cfc_safety_test)
+add_test(NAME ObservationTest COMMAND observation_test)
+add_test(NAME CfcSafetyTest  COMMAND cfc_safety_test)
 
 # Custom target for cleaning generated files
 add_custom_target(clean-all
@@ -189,10 +300,12 @@ add_custom_target(clean-all
 )
 
 # Print configuration summary
-message(STATUS "---------------- LiveVoxelMapper ----------------")
+message(STATUS "---------------- dronectl ----------------")
 message(STATUS "Build type:        ${CMAKE_BUILD_TYPE}")
 message(STATUS "C++ compiler:      ${CMAKE_CXX_COMPILER}")
 message(STATUS "C++ flags:         ${CMAKE_CXX_FLAGS}")
 message(STATUS "OpenMP:            ${OpenMP_CXX_FOUND}")
+message(STATUS "FC bridge:         ${DRONECTL_ENABLE_FC_BRIDGE}")
+message(STATUS "CfC pilot:         ${DRONECTL_ENABLE_CFC}")
 message(STATUS "Target arch:       ${CMAKE_SYSTEM_PROCESSOR}")
-message(STATUS "------------------------------------------------")
+message(STATUS "------------------------------------------")

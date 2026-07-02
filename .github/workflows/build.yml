@@ -7,42 +7,47 @@ on:
     branches: [main, master]
 
 jobs:
-  build:
-    name: Build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-
+  make:
+    name: Make build + test (Linux, gate)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install deps (Linux)
-        if: runner.os == 'Linux'
+      - name: Install build deps
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential libomp-dev
+
+      - name: Build (Make)
+        run: make
+
+      - name: Run full Make test suite
+        run: make test
+
+  cmake:
+    name: CMake configure + build (Linux, reference)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
         run: |
           sudo apt update
           sudo apt install -y build-essential cmake libomp-dev
 
-      - name: Install deps (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install cmake libomp || true
-
-      - name: Install deps (Windows)
-        if: runner.os == 'Windows'
-        run: choco install cmake -y
-
       - name: Configure (CMake)
+        # Option gates default OFF (manual Part 9.2): a bare configure with
+        # no external deps installed must succeed. MAVSDK + onnxruntime are
+        # deliberately not installed here so the gates stay closed. A
+        # wrapped build turns the options on explicitly:
+        #   -DDRONECTL_ENABLE_FC_BRIDGE=ON -DDRONECTL_ENABLE_CFC=ON
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release .
 
       - name: Build (CMake)
         run: cmake --build build --config Release
 
-      - name: Run smoke tests
-        run: |
-          clang++ -std=c++17 -O2 -I. -o build/smoke_test tests/smoke_test.cpp
-          ./build/smoke_test
+      - name: Run CTest
+        run: ctest --test-dir build --output-on-failure
 
   rpi-cross:
     name: Cross-compile for Raspberry Pi (aarch64)

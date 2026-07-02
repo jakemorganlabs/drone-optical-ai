@@ -1,0 +1,21 @@
+# Managed by dronectl
+# tether-agent: fiber/IP datalink ground side (manual Part 5.2/8.1).
+#
+# Install-name note: the Phase 4 Makefile builds the binary as
+# `build/tether_agent` (snake_case); this stage installs it to
+# /opt/dronectl/bin/tether-agent (kebab-case) to match the systemd unit and
+# the `dronectl status` probe. The pi-gen stage either renames or symlinks
+# tether_agent -> tether-agent when dropping the artifact into /opt/dronectl/bin.
+# Until then this unit restart-loops harmlessly.
+[Unit]
+Description=tether-agent (fiber/IP datalink)
+After=network-online.target dronectl-pilot.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/opt/dronectl/bin/tether-agent
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

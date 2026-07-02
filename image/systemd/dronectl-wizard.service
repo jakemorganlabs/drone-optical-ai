@@ -1,0 +1,19 @@
+# Managed by dronectl
+# First-boot-only provisioning wizard (manual Part 8.4). Runs once when no
+# /etc/dronectl/config.yaml exists; the wizard writes that file, disables this
+# unit (`systemctl disable dronectl-wizard.service`), and reboots -- so on the
+# next boot ConditionPathExists=!/etc/dronectl/config.yaml is false and the
+# unit is a no-op. Enabled at bake.
+[Unit]
+Description=DroneCtl first-boot provisioning wizard
+ConditionPathExists=!/etc/dronectl/config.yaml
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/dronectl/bin/wizard --apply
+
+[Install]
+WantedBy=multi-user.target

@@ -11,18 +11,18 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Compiler flags. Use generator expressions so gcc/clang get -Wall -Wextra
-# while MSVC gets /W4 (and the gcc-only -O flags stay off MSVC's command line,
-# which would otherwise be mis-parsed by cl.exe, e.g. D8021 invalid numeric
-# argument '/Wextra').
+# while MSVC gets /W4 (gcc-only -Wextra would otherwise be mis-parsed by
+# cl.exe as /Wextra -> D8021 invalid numeric argument). Do NOT override
+# CMAKE_CXX_FLAGS_<CONFIG> here: CMake already supplies toolchain-correct
+# defaults (gcc -O3 -DNDEBUG for Release, MSVC /O2 /DNDEBUG) and putting
+# generator expressions with list separators (';') into those string
+# variables leaks the ';' as a shell command separator and corrupts the
+# compiler-depend .ts filename.
 add_compile_options(
     $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-Wall>
     $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-Wextra>
     $<$<CXX_COMPILER_ID:MSVC>:/W4>
 )
-set(CMAKE_CXX_FLAGS_DEBUG
-    "$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-g;-O0>")
-set(CMAKE_CXX_FLAGS_RELEASE
-    "$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-O3;-DNDEBUG>")
 
 # Output to ./build/bin for convenience
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

@@ -110,9 +110,9 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-## Option A build manual pages
+## Build manual pages
 
-This repo is the partial implementation of **Option A** — an onboard
+This repo is the partial implementation of an onboard
 CfC-piloted drone with a fiber tether, a shared ground box, and a
 remote LLM mission brain. The end-to-end design lives across these docs:
 

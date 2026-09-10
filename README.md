@@ -300,7 +300,7 @@ run the wizard at `http://10.0.0.1/`, and fly. The same image works with
 
 ## License
 
-MIT License — see [LICENSE](LICENSE). The optional `third_party/`
+[![License: CC BY-NC-ND 4.0](https://img.shields.io/badge/License-CC%20BY--NC--ND%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-nd/4.0/) — see [LICENSE](LICENSE). The optional `third_party/`
 dependencies (nlohmann/json, stb) retain their own licenses.
 
 ## Acknowledgments

@@ -1,21 +1,65 @@
-MIT License
+# License
 
-Copyright (c) 2026 jakemorganlabs
+Copyright (c) 2026 [Jake Morgan]
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This work is dual-licensed as follows.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+## Public license (everyone else)
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+This work is licensed under the
+**Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International**
+Public License (CC BY-NC-ND 4.0).
+
+Deed: https://creativecommons.org/licenses/by-nc-nd/4.0/  
+Legal code: https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode  
+Plaintext: https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode.txt
+
+You may copy and redistribute this work in any medium or format for
+**non-commercial** purposes only, provided you give appropriate credit,
+provide a link to the license, and do **not** distribute adapted /
+derivative versions.
+
+## Licensor and additional commercial licensees
+
+CC BY-NC-ND 4.0 binds the public ("You"). It does **not** restrict the
+Licensor.
+
+The Licensor retains all rights not expressly granted to the public,
+including the exclusive right to use, reproduce, adapt, distribute,
+perform, display, sublicense, sell, and otherwise commercially exploit
+this work, in original or adapted form.
+
+The Licensor may also grant separate written commercial licenses to
+other persons or entities ("Additional Licensees"). An Additional
+Licensee may use this work commercially only to the extent set out in
+that separate written grant.
+
+Unless a separate written commercial license says otherwise:
+
+- Additional Licensees must still give Attribution as required by
+  CC BY-NC-ND 4.0 when they share the work publicly; and
+- Additional Licensees may not publicly share Adapted Material unless
+  their separate written license expressly allows it.
+
+Any commercial use by anyone other than the Licensor or an Additional
+Licensee requires a separate written license from the Licensor.
+
+This notice does not modify the text of CC BY-NC-ND 4.0 for the public.
+It is an additional reservation and a separate-permission notice, which
+CC BY-NC-ND 4.0 Section 6(c) and Section 7(b) already allow.
+
+---
+
+# Short Notice
+
+This work (c) by [Jake Morgan]
+
+This work is licensed under a
+Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License.
+
+You should have received a copy of the license along with this
+work. If not, see <https://creativecommons.org/licenses/by-nc-nd/4.0/>.
+
+---
+
+# Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International Public License
